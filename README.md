@@ -45,11 +45,16 @@ algorithm, implemented as the ROS 2 Python package `gap_follow`.
    with a `best_point_window`-beam moving average and aim at the centre of the
    deepest window. On a long straight, where many beams are equally far, this
    resolves to the middle of the corridor instead of twitching between beams.
-6. **Steering and speed**: the target angle is clipped to the steering limit,
+6. **Corner guard**: Follow the Gap aims at the deepest point around a
+   corner, and the line to it skims the inside wall. The node checks the
+   clearance beside the car (60°–120° on each side of the raw scan). If the
+   car is steering toward a side closer than `corner_clearance`, the steering
+   toward that side is scaled down, reaching zero at half the car width.
+7. **Steering and speed**: the target angle is clipped to the steering limit,
    then smoothed (exponential moving average plus a per-scan rate limit).
-   Speed is high when steering is near straight and lower in turns, and is
-   capped by `free path ahead / time_headway` so the car slows early when
-   driving toward a wall.
+   Speed blends linearly from `high_speed` (straight) to `low_speed` (full
+   lock), and is capped by `free path ahead / time_headway` (never below
+   `min_speed`) so the car slows early when driving toward a wall.
 
 ## Build and run
 
@@ -86,14 +91,15 @@ All parameters live in `gap_follow/config/params.yaml`.
 | `fov_deg` | 70.0 | half-angle of the forward window used (deg) |
 | `max_range` | 6.0 | returns are clipped to this distance (m) |
 | `smoothing_window` | 5 | moving-average window in preprocessing (beams) |
-| `car_width`, `width_margin` | 0.31, 0.06 | width used by the disparity extender (m) |
+| `car_width`, `width_margin` | 0.31, 0.15 | width used by the disparity extender (m) |
 | `disparity_threshold` | 0.3 | range jump treated as an obstacle edge (m) |
 | `bubble_radius`, `bubble_speed_gain` | 0.2, 0.03 | safety bubble radius = base + gain × speed |
 | `gap_threshold`, `gap_threshold_ratio` | 2.5, 0.7 | free-space threshold and its cap relative to the deepest beam |
 | `best_point_window` | 40 | smoothing window when choosing the best point (beams) |
-| `high_speed`, `mid_speed`, `low_speed` | 4.0, 2.5, 1.0 | speed schedule (m/s) |
-| `straight_angle_deg`, `turn_angle_deg` | 10, 20 | steering thresholds for the speed schedule |
-| `time_headway` | 1.0 | speed ≤ free path ahead / headway (s) |
+| `high_speed`, `low_speed` | 4.0, 2.0 | speed when straight / at full steering lock (m/s) |
+| `min_speed` | 1.0 | floor for the free-path-ahead speed cap (m/s) |
+| `corner_clearance` | 0.55 | side clearance below which steering toward that side is reduced (m) |
+| `time_headway` | 0.5 | speed ≤ free path ahead / headway (s) |
 | `steering_alpha`, `max_steering_step` | 0.6, 0.12 | steering smoothing and per-scan rate limit |
 
 ## Results (offline simulation)
@@ -103,7 +109,9 @@ on the map PNGs (1080 beams, 270° FOV), a kinematic bicycle model with
 f1tenth_gym geometry, and a full-footprint collision check.
 
 - **levine_blocked**: completes laps without collision from four different
-  spawn poses in both directions around the loop, at about 3 m/s on average.
+  spawn poses in both directions around the loop. The car averages about
+  3.4 m/s, takes corners at about 2.7 m/s, and stays at least 11 cm from the
+  walls (the closest point is at the inside of corners).
 - **levine_obs**: gets through most of the obstacle course but still collides
   at its hardest spots. The bottom-right corner, where a box narrows the exit
   to about 0.8 m, and lanes beside the ellipse that are 0.45 m wide for a

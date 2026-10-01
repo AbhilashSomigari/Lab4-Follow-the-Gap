@@ -8,7 +8,7 @@ gap_follow_node:
     smoothing_window: 5
     # disparity extender
     car_width: 0.31
-    width_margin: 0.06
+    width_margin: 0.15
     disparity_threshold: 0.3
     # safety bubble (radius = bubble_radius + bubble_speed_gain * speed)
     bubble_radius: 0.2
@@ -19,11 +19,10 @@ gap_follow_node:
     best_point_window: 40
     # speed and steering
     max_steering: 0.4189
-    high_speed: 4.0
-    mid_speed: 2.5
-    low_speed: 1.0
-    straight_angle_deg: 10.0
-    turn_angle_deg: 20.0
-    time_headway: 1.0
+    high_speed: 4.0          # speed when driving straight
+    low_speed: 2.0           # speed at full steering lock (linear blend)
+    min_speed: 1.0           # floor for the free-path-ahead cap
+    corner_clearance: 0.55   # side clearance below which steering toward that side is reduced
+    time_headway: 0.5
     steering_alpha: 0.6
     max_steering_step: 0.12

@@ -11,8 +11,10 @@ Pipeline run on every LiDAR scan:
   4. find_max_gap      - longest run of consecutive free beams.
   5. find_best_point   - "better idea": centre of the deepest part of the
                          gap instead of the single farthest beam.
-  6. speed from steering angle and free path ahead, smoothed steering,
-     publish AckermannDriveStamped on /drive.
+  6. corner guard      - stop steering into a wall that is already close
+                         beside the car (prevents cutting inside corners).
+  7. smoothed steering, speed blended on steering angle and capped by the
+     free path ahead, publish AckermannDriveStamped on /drive.
 """
 
 import math
@@ -46,7 +48,7 @@ class GapFollowNode(Node):
 
         # Disparity extender
         self.car_width = self.declare_parameter('car_width', 0.31).value
-        self.width_margin = self.declare_parameter('width_margin', 0.06).value
+        self.width_margin = self.declare_parameter('width_margin', 0.15).value
         self.disparity_threshold = self.declare_parameter(
             'disparity_threshold', 0.3).value
 
@@ -68,13 +70,11 @@ class GapFollowNode(Node):
         self.max_steering = self.declare_parameter(
             'max_steering', 0.4189).value
         self.high_speed = self.declare_parameter('high_speed', 4.0).value
-        self.mid_speed = self.declare_parameter('mid_speed', 2.5).value
-        self.low_speed = self.declare_parameter('low_speed', 1.0).value
-        self.straight_angle_deg = self.declare_parameter(
-            'straight_angle_deg', 10.0).value
-        self.turn_angle_deg = self.declare_parameter(
-            'turn_angle_deg', 20.0).value
-        self.time_headway = self.declare_parameter('time_headway', 1.0).value
+        self.low_speed = self.declare_parameter('low_speed', 2.0).value
+        self.min_speed = self.declare_parameter('min_speed', 1.0).value
+        self.corner_clearance = self.declare_parameter(
+            'corner_clearance', 0.55).value
+        self.time_headway = self.declare_parameter('time_headway', 0.5).value
         self.steering_alpha = self.declare_parameter(
             'steering_alpha', 0.6).value
         self.max_steering_step = self.declare_parameter(
@@ -261,6 +261,40 @@ class GapFollowNode(Node):
             return self.max_range
         return float(x[blocking].min())
 
+    def side_clearance(self, ranges, angle_min, angle_increment):
+        """
+        Closest obstacle beside the car on the left and on the right.
+
+        Uses the raw scan (60-120 deg on each side), which the forward window
+        does not cover. Returns (left, right) in metres.
+        """
+        r = np.asarray(ranges, dtype=np.float64)
+        a = angle_min + np.arange(r.size) * angle_increment
+        valid = np.isfinite(r) & (r > 0.0)
+        lo, hi = math.radians(60.0), math.radians(120.0)
+        left = valid & (a >= lo) & (a <= hi)
+        right = valid & (a <= -lo) & (a >= -hi)
+        left_min = float(r[left].min()) if np.any(left) else self.max_range
+        right_min = float(r[right].min()) if np.any(right) else self.max_range
+        return left_min, right_min
+
+    def corner_guard(self, steering, left, right):
+        """
+        Stop the car from cutting into a wall that is already beside it.
+
+        Follow the Gap aims at the deepest point around a corner, and the
+        straight line to it skims the inside of the corner. When the car
+        steers toward a side whose clearance is below corner_clearance, the
+        steering toward that side is scaled down linearly, reaching zero when
+        the clearance equals half the car width.
+        """
+        half_width = self.car_width / 2.0
+        side = left if steering > 0.0 else right
+        if side >= self.corner_clearance:
+            return steering
+        scale = (side - half_width) / (self.corner_clearance - half_width)
+        return steering * float(np.clip(scale, 0.0, 1.0))
+
     def lidar_callback(self, data):
         """Run Follow the Gap on one scan and publish the drive command."""
         ranges = data.ranges
@@ -301,24 +335,23 @@ class GapFollowNode(Node):
         # exponential moving average, then a per-scan rate limit.
         target = float(np.clip(best_angle, -self.max_steering,
                                self.max_steering))
+        left, right = self.side_clearance(ranges, angle_min, angle_increment)
+        target = self.corner_guard(target, left, right)
         smoothed = (self.steering_alpha * target +
                     (1.0 - self.steering_alpha) * self.steering)
         step = float(np.clip(smoothed - self.steering,
                              -self.max_steering_step, self.max_steering_step))
         self.steering = self.steering + step
 
-        # Increase speed if the best angle is close to zero (straight ahead),
-        # and never drive faster than the free path ahead allows.
-        steer_deg = abs(math.degrees(self.steering))
-        if steer_deg < self.straight_angle_deg:
-            speed = self.high_speed
-        elif steer_deg < self.turn_angle_deg:
-            speed = self.mid_speed
-        else:
-            speed = self.low_speed
+        # Increase speed if the best angle is close to zero (straight ahead):
+        # blend smoothly from high_speed (straight) to low_speed (full lock)
+        # instead of stepping, and never drive faster than the free path
+        # ahead allows.
+        turn = min(abs(self.steering) / self.max_steering, 1.0)
+        speed = self.high_speed - (self.high_speed - self.low_speed) * turn
         front = self.free_path_ahead(proc_ranges, angle_min, angle_increment)
         if self.time_headway > 0.0:
-            speed = min(speed, max(self.low_speed, front / self.time_headway))
+            speed = min(speed, max(self.min_speed, front / self.time_headway))
         self.speed = speed
 
         # Publish Drive message
