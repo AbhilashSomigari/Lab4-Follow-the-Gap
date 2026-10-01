@@ -1,0 +1,29 @@
+gap_follow_node:
+  ros__parameters:
+    scan_topic: /scan
+    drive_topic: /drive
+    # preprocessing
+    fov_deg: 70.0
+    max_range: 6.0
+    smoothing_window: 5
+    # disparity extender
+    car_width: 0.31
+    width_margin: 0.06
+    disparity_threshold: 0.3
+    # safety bubble (radius = bubble_radius + bubble_speed_gain * speed)
+    bubble_radius: 0.2
+    bubble_speed_gain: 0.03
+    # gap selection / best point
+    gap_threshold: 2.5
+    gap_threshold_ratio: 0.7
+    best_point_window: 40
+    # speed and steering
+    max_steering: 0.4189
+    high_speed: 4.0
+    mid_speed: 2.5
+    low_speed: 1.0
+    straight_angle_deg: 10.0
+    turn_angle_deg: 20.0
+    time_headway: 1.0
+    steering_alpha: 0.6
+    max_steering_step: 0.12

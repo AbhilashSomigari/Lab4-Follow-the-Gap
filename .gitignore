@@ -1,0 +1,7 @@
+CLAUDE.md
+**/__pycache__/
+*.pyc
+**/build/
+**/install/
+**/log/
+.DS_Store
